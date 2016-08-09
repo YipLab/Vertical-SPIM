@@ -1,0 +1,6 @@
+int[] zHigh = new int[40]; //1.92 v   in 0.1 um
+int[] zLow = new int[40]; //1.92 v   in 0.1 um
+int[] yPos =  new int[40]; //0.001mm
+int[] xPos = new int[40];   //0.001mm
+int[] rPos = new int[40];
+int[] focusPos = new int[40];

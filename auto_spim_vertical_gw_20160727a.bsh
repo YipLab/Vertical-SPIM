@@ -1,0 +1,617 @@
+
+edit = 0;
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////LIBRARIES
+
+import ij.IJ;
+import ij.ImagePlus;
+import ij.io.FileSaver;
+import ij.process.ImageProcessor;
+import org.micromanager.utils.ImageUtils;
+import org.micromanager.api.AcquisitionOptions;
+//imports for header writer
+import ij.*;
+import ij.ImagePlus;
+//imports for time acquiring
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.GregorianCalendar;
+import java.util.TimeZone;
+//imports for multiD acquisition
+import java.lang.System;
+import org.micromanager.api.AcquisitionOptions;
+import ij.gui.GenericDialog;
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////VAR
+int[]  first_image = new int[40];
+show = 0;
+String [] array = {
+  "ON", "OFF"
+};
+String [] array1 = {
+  "YES", "NO"
+};
+String [] excitation = {
+  "Bright field", "650", "532", "488", "408/444"
+};
+String [] emission = {
+  "Bright field", "750", "700", "650", "600", "550", "500", "450",  "535"
+};
+
+String [] excitation_ = {
+  "408/444",  "650",   "488",  "650", "532"
+};
+String [] emission_ = {
+  "450",   "Bright field",  "500",  "700",   "750",  "650", "600", "550",  "535"
+};
+
+com_hdd_shutter = "COM14";
+com_asi = "COM10";
+com_controller = "COM17";
+com_esp300 = "COM4";
+com_spin_bot = "COM16";
+com_wheel = "COM8";
+com_galvo = "COM25";
+com_focus = "COM16";
+////////////////
+//EXCITATION
+//LASER: 1   0   2   3   4      5
+//COLOR: 650 530 488 408/444 GALVO  NUL
+//STATE: 2   1   32  16  8      4
+// com_focus = "COM81";
+
+preview = "YES";
+tiff_header = 0;
+
+////////////
+//DUMMY VAR
+acqName = "GW-002-274mCherry"; //***************
+notes = "dual illumin";
+exposure = 150;         //***************
+distance = 3;         //  *****************
+inter_volume_interval = 20 ; // in s
+nrHr = 5;
+//nrTime = 1; 
+nrTime = nrHr * 60 * 60 / inter_volume_interval; // # of time points
+nrView = 2; //96,192    //  *****************
+tBottom = 5000; //1500 ms;  // this includes multiview delay
+zSettleTime = 300;      //  *****************
+int[] nrSlices = new int[40];
+
+
+
+/////////
+//XY STAGE
+spd_esp1 = 0.4; //20160627: 0.2
+accl_esp1 = 0.8; //20160627: 0.8 
+dccl_esp1 = 0.8; //20160627: 0.8
+spd_esp2 = 0.4; 
+accl_esp2 = 0.8; 
+dccl_esp2 = 0.8;
+
+laser = 2;
+nrChannel = 1;
+nrFram = 1;
+
+
+//////////////////
+//CALCUL IMG SIZE
+float imgSize  = (float) 10801 * mmc.getROI().width * mmc.getROI().height / 2160 / 2560 / 1000; // in mb
+
+///////////////////////////////////////////////////////////////////
+//MAG
+//////
+//10X
+pixelWidth = 1000.0 / 212; //um per pixel at 10x
+pixelHeight = 1000.0 / 212;
+pixelDepth = distance;
+
+///////
+//60X
+//pixelWidth  = 100.0 / 430 / 2560 * mmc.getROI().width; //um per pixel at 10x
+//pixelHeight = 100.0 / 430 / 2160 * mmc.getROI().height;
+
+pixelWidth  = 100.0 / 430;
+pixelHeight = 100.0 / 430;
+pixelDepth = distance;
+
+///////
+//20X air
+pixelWidth = 1000.0 / 212 / 2.0; //um per pixel at 10x
+pixelHeight = 1000.0 / 212 / 2.0;
+pixelDepth = distance;
+
+///////
+//20X water
+pixelWidth = 100.0 / 427.5; //um per pixel at 10x
+pixelHeight = 100.0 / 427.5;
+pixelDepth = distance;
+
+///////////
+//lasers on
+//mmc.setSerialPortCommand(com_controller, "77701", "\r") ;   //ie 77701 =  laser 0 on
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////FCN
+gui.clearMessageWindow();
+print (">>> AUTO-SPIM-vertical     Gang Wang, the Yip Lab     Jan 15, 2014 \n\n");
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////getting time
+String min, hr, day, mth, yr, sec;
+void getTime () {
+  SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss" );
+  GregorianCalendar calendar = new GregorianCalendar();
+  calendar.setTimeZone( TimeZone.getTimeZone( "Canada/Eastern" ) );
+  sec = Integer.toString(calendar.get( Calendar.SECOND ));
+  if (sec.length() == 1) sec = "0" + sec;
+  min = Integer.toString(calendar.get( Calendar.MINUTE ));
+  if (min.length() == 1) min = "0" + min;
+  hr = Integer.toString(calendar.get( Calendar.HOUR_OF_DAY ));
+  if (hr.length() == 1) hr = "0" + hr; //hr=hour
+  day = Integer.toString(calendar.get( Calendar.DAY_OF_MONTH ));
+  if (day.length() == 1) day = "0" + day;
+  mth = Integer.toString((1 + calendar.get( Calendar.MONTH )));
+  if (mth.length() == 1) mth = "0" + mth; //mth=month
+  yr =  Integer.toString(( calendar.get( Calendar.YEAR )));
+  print ("CURRENT TIME: " + hr + ":" + min + ":" + sec + "  " + mth + "/" + day + "/" + yr);
+}
+getTime ();
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////GUI
+////////////////////////////
+//reminder for live mode off
+gd = new ij.gui.GenericDialog("Reminder");
+gd.addMessage("Reminder: turn off 'live mode' of camera before runing this script");
+// gd.showDialog();
+if (gd.wasCanceled())return;
+
+while (preview == "YES") {
+  //generate 1st dialog
+  gd = new ij.gui.GenericDialog("AUTO-SPIM-vertical, GW AUG 2013");
+  gd.addMessage("> Welcome to SPIM");
+  gd.addStringField ("Acquisition name:", acqName);
+  gd.addStringField ("Notes (in tif header):", notes);
+  gd.addNumericField ("Exposure (ms):", exposure, 0);
+  gd.addChoice("Autoshutter:", array, array[0]);
+  gd.addMessage(" ");
+  gd.addNumericField ("Imagine duration (hrs):", nrHr, 0);
+  gd.addNumericField ("Inter-volume interval (s):", inter_volume_interval , 0);
+  gd.addNumericField ("Slice thickness (um):", distance , 10);
+  gd.addNumericField ("Stage travel time incl. multiView (ms):", tBottom , 0);
+
+  gd.addMessage(" ");
+  gd.addNumericField ("# of frames:", nrFram, 0);
+  gd.addNumericField ("# of channels:", nrChannel, 0);
+  gd.addNumericField ("Multi-view # (minimum 1): ", nrView, 0);
+  gd.showDialog();
+  if (gd.wasCanceled())return;
+
+  //input assign
+  acqName = gd.getNextString();
+  notes = gd.getNextString();
+  exposure = gd.getNextNumber();
+  autoshutter = gd.getNextChoice();
+  nrHr = gd.getNextNumber();
+  inter_volume_interval = gd.getNextNumber();
+
+  distance = gd.getNextNumber();
+  tBottom = gd.getNextNumber();
+  nrFram = gd.getNextNumber();
+  nrChannel = gd.getNextNumber();
+  nrView = gd.getNextNumber();
+  /////////////////////////
+  //generate XY list dialog
+  gd = new ij.gui.GenericDialog("AUTO-SPIM - CHANNELS, GW AUG 2013");
+  ///////////////////
+  //CHANNEL SELECTION
+  gd.addMessage("--------- CHANNELS ----------");
+  gd.addChoice("Excitation 0", excitation, excitation_[4]);
+  gd.addChoice("Emission 0", emission, emission_[6]);
+  //  gd.addChoice("Excitation 0", excitation, excitation_[0]);
+  //  gd.addChoice("Emission 0", emission, emission_[0]);
+  gd.addChoice("Excitation 1", excitation, excitation_[2]);
+  gd.addChoice("Emission 1", emission, emission_[8]);
+  gd.addChoice("Excitation 2", excitation, excitation_[0]);
+  gd.addChoice("Emission 2", emission, emission_[0]);
+
+
+
+  //////////////////////////////////////////////////////////////////////////////////////////
+  //MULTI VIEW SELECTION
+  gd.addMessage("--------- ROTATION ----------");
+  for (i = 0; i < nrView; i++) {
+    gd.addNumericField ("X" + i + "(unit: 0.001mm)", xPos[i] , 0);
+    gd.addNumericField ("Y" + i + "(unit: 0.001mm)", yPos[i] , 0);
+    gd.addNumericField ("Z" + i + " low(unit: 0.1um)", zLow[i] , 0);
+    //        gd.addNumericField ("Z"+i+"low(unit: 0.1um)", zLow[i] , 0);
+    gd.addNumericField ("R" + i + "(unit:stp; 384stp=1rev)", rPos[i] , 0);
+    gd.addMessage("  ");
+  }
+
+  gd.addChoice("Review parameters?", array1, array1[1]);
+  gd.showDialog();
+  if (gd.wasCanceled())return;
+
+  //////////////
+  //CHANNEL INPUT
+  excitation[0] = gd.getNextChoice();
+  emission[0] = gd.getNextChoice();
+  excitation[1] = gd.getNextChoice();
+  emission[1] = gd.getNextChoice();
+  excitation[2] = gd.getNextChoice();
+  emission[2] = gd.getNextChoice();
+
+
+  /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  //MULTI VIEW SELECTION
+  for (i = 0; i < nrView; i++) {
+    xPos[i] = (int)gd.getNextNumber();
+    yPos[i] = (int)gd.getNextNumber();
+    zLow[i] = (int)gd.getNextNumber();
+    rPos[i] = (int)gd.getNextNumber();
+
+    print ("X" + i + "=" + xPos[i]);
+    print ("y" + i + "=" + yPos[i]);
+    print ("zLow" + i + "=" + zLow[i]);
+    print ("R" + i + "=" + rPos[i]);
+  }
+
+  //////////////////////////////////////////////////////////////////////////////////////////////////// GUI ENDS
+
+  for (view = 0; view < nrView; view ++){ 
+    nrSlices [view] = (int)((zHigh[view] - zLow[view])/10/distance);          //  *****************
+  }
+
+  void parameter_summary() {
+    summary = new ij.gui.GenericDialog("LIGHT SHEET: " + acqName);
+    getTime ();
+    summary.addMessage ("IMAGING TIME: " + hr + ":" + min + ":" + sec + "  " + mth + "/" + day + "/" + yr);
+    summary.addMessage ("IMAGINE DURATION (hr): " + nrHr); // in min
+    summary.addMessage ("NOTE: " + notes);
+    summary.addMessage ("PIXEL SIZE (um/px):  " + pixelWidth);
+    summary.addMessage ("PIXEL DEPTH (um/px):  " + pixelDepth);
+    summary.addMessage ("TIME POINTS: " + nrTime + " (" + nrHr + "hrs)");
+    summary.addMessage ("INTER-VOLUME INTERVAL (s): " + inter_volume_interval);
+    for (view = 0; view < nrView; view ++) summary.addMessage ("SLICES: " + nrSlices [view]);
+    summary.addMessage ("SLICE THICKNESS (um): " + distance);
+    summary.addMessage ("# OF FRAMES: " + nrFram);
+    summary.addMessage ("Multi-view: " + nrView);
+    summary.addMessage ("EXPOSURE (MS): " + exposure);
+    summary.addMessage ("Stage delay incl. multiView (ms): " + tBottom);
+    summary.addMessage ("Image size: " + imgSize + " MB");
+    total_size = nrSlices [0] * imgSize * (nrTime+1) * nrView;
+    summary.addMessage ("EST TOTAL SIZE: " + (int) total_size + "MB");
+    summary.addMessage ("----------------------------------");
+
+    for (i = 0; i < nrChannel; i++) {
+      summary.addMessage ("EXCITATION: " + excitation[i]);
+      summary.addMessage ("EMISSION: " +   emission[i]);
+    }
+    summary.showDialog();
+    if (summary.wasCanceled())break;
+  }
+  parameter_summary();
+  preview = gd.getNextChoice();
+  print ("preview=" + preview + "\n");
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//get saving dir
+
+//////////////////
+//SAVING TO SSD
+//rootDirName = IJ.getDirectory("Select saving directory:");
+rootDirName = "F:";
+rootDirName = rootDirName + "\\" + acqName;
+
+//if (gd.wasCanceled())return;
+new File(rootDirName).mkdirs();
+//new File(rootDirName + "//decon").mkdirs();
+//new File(rootDirName + "//decon//mip").mkdirs();
+//new File(rootDirName + "//halved").mkdirs();
+//new File(rootDirName + "//halved//decon").mkdirs();
+//new File(rootDirName + "//halved//decon//mip").mkdirs();
+new File(rootDirName + "//processing").mkdirs();
+new File(rootDirName + "//summary").mkdirs();
+new File(rootDirName + "//processing//3D_render").mkdirs();
+new File(rootDirName + "//processing//mip").mkdirs();
+
+for (c1 = 0; c1 < nrChannel; c1++) {
+  for (v1 = 0; v1 < nrView; v1++) {
+    new File(rootDirName +  "//v" + v1 + "c" + c1).mkdirs();
+  }
+}
+
+
+/////////////////////
+//SAVE PARAMETER IMG
+IJ.run("Paste");
+IJ.saveAs("Jpeg", rootDirName + "\\summary\\imagingParameters.jpg");
+IJ.run("Close All");
+gui.message ("Set laser controller & spin-bot to 'REMOTE'");
+
+// clear all previous acquisitions
+gui.closeAllAcquisitions();
+gui.clearMessageWindow();
+if (autoshutter == "ON")
+mmc.setAutoShutter(true);
+else
+  mmc.setAutoShutter(false);
+
+print ("\n\n>>> AUTO-SPIM EXECUTED  \n\n");
+startTime = System.currentTimeMillis();
+
+imageCount = 0;
+
+////////////////
+//CLOSE SHUTTER
+mmc.setSerialPortCommand(com_controller, "77790", "\r"); //shut all lasers (software shutter)
+mmc.setSerialPortCommand(com_hdd_shutter, "77700", "\r\n");
+mmc.setSerialPortCommand(com_hdd_shutter, "77710", "\r\n");
+mmc.setSerialPortCommand(com_hdd_shutter, "77730", "\r\n");
+mmc.setSerialPortCommand(com_hdd_shutter, "77740", "\r\n");
+
+//////////////////////////////////////////////////////////////////////////////////////////////////ACQUIRE
+for (TIME = 0; TIME < nrTime; TIME++) { ///////////////////////////////////////////////////////////////////////////////////////////TIME LOOP
+  //  if (edit == 1) print (">>> TIME"+TIME);
+  now = System.currentTimeMillis();
+  for (view = 0; view < nrView; view ++) { //////////////////////////////////////////////////////////////////////////////////////////////////multi-view loop
+    //    if (edit == 1) print (">>> VIEW"+view);
+
+    ////////////
+    //MULTI-VIEW
+    if (nrView > 1) {
+
+      ///////
+      //rPos
+      if (edit == 1)print ("SPIN-BOT: 8881" + (int)(rPos[view]));
+      mmc.setSerialPortCommand(com_spin_bot, "8881" + (int)(rPos[view]), "\r\n"); //384 stp = 1 rev   PM35S-048-HHC6    0125 -> 0:motor 0    1:forward dir    25: 25 steps///////////////////////////////////////////////////////////////////mmc.setSerialPortCommand(com_spin_bot, "8881" + (int)(rPos[view]), "\r\n"); //384 stp = 1 rev   PM35S-048-HHC6    0125 -> 0:motor 0    1:forward dir    25: 25 steps///////////////////////////////////////////////////////////////////)(rPos[view]), "\r\n"); //384 stp = 1 rev   PM35S-048-HHC6    0125 -> 0:motor 0    1:forward dir    25: 25 steps///////////////////////////////////////////////////////////////////
+      mmc.setSerialPortCommand(com_spin_bot, "8882" + (int)(focusPos[view]), "\r\n"); //384 stp = 1 rev   PM35S-048-HHC6    0125 -> 0:motor 0    1:forward dir    25: 25 steps///////////////////////////////////////////////////////////////////
+
+      /////////////////////////////
+      //Initiate ESP300
+      mmc.setSerialPortCommand(com_esp300, "1mo", "\r\n");
+      mmc.setSerialPortCommand(com_esp300, "2mo", "\r\n");
+      mmc.setSerialPortCommand(com_esp300, "1tj1", "\r\n");
+      mmc.setSerialPortCommand(com_esp300, "2tj1", "\r\n");
+      //mmc.setSerialPortCommand(com_esp300, "1oh0.4", "\r\n"); //set velocity for homing
+      //mmc.setSerialPortCommand(com_esp300, "2oh0.4", "\r\n"); //set velocity for homing
+      mmc.setSerialPortCommand(com_esp300, "1VA" + spd_esp1, "\r\n"); // set vel
+      mmc.setSerialPortCommand(com_esp300, "2VA" + spd_esp2, "\r\n"); // set vel
+      mmc.setSerialPortCommand(com_esp300, "1AC" + accl_esp1, "\r\n"); // set accl
+      mmc.setSerialPortCommand(com_esp300, "2AC" + accl_esp2, "\r\n"); // set accl
+      mmc.setSerialPortCommand(com_esp300, "1AG" + dccl_esp1, "\r\n"); // set accl
+      mmc.setSerialPortCommand(com_esp300, "2AG" + dccl_esp2, "\r\n"); // set accl
+      ///////
+      //xPos
+      if (edit == 1)print ("xPos: " + (float)xPos[view] / 1000);
+      mmc.setSerialPortCommand(com_esp300, "2pa" + (float)xPos[view] / 1000, "\r\n");
+      ///////
+      //yPos
+      if (edit == 1)print ("yPos: " + (float)yPos[view] / 1000);
+      mmc.setSerialPortCommand(com_esp300, "1pa" + (float)yPos[view] / 1000, "\r\n");
+    }
+
+    for (channel = 0; channel < nrChannel; channel ++) { //////////////////////////////////////////////////////////////////////////////////////////////////channel loop
+      //          if (edit == 1) print (">>> CHANNEL"+channel);
+      /////////////////////////////
+      //MOVING TO START POSITION Z
+      //print("Z low " + view + ": " + zLow [view]);
+      //print("VIEW: " + view);
+      //  mmc.setPosition(mmc.getFocusDevice(), zPos);
+      mmc.setSerialPortCommand(com_asi, "1H M Z=" + zLow [view], "\r\n");
+      gui.sleep((int)tBottom);
+      //////////////
+      //EMISSION
+      if (emission[channel] == "750") {
+        mmc.setSerialPortCommand(com_wheel, "5", "\r\n");
+        //mmc.setProperty("Wheel-A", "Label", "Filter-5");
+      }
+      else if (emission[channel] == "700") {
+        mmc.setSerialPortCommand(com_wheel, "9", "\r\n");
+        //mmc.setProperty("Wheel-A", "Label", "Filter-9");
+      }
+      else if (emission[channel] == "650") {
+        mmc.setSerialPortCommand(com_wheel, "8", "\r\n");
+        //mmc.setProperty("Wheel-A", "Label", "Filter-8");
+      }
+      else if (emission[channel] == "600") {
+        mmc.setSerialPortCommand(com_wheel, "7", "\r\n");
+        //mmc.setProperty("Wheel-A", "Label", "Filter-7");
+      }
+      else if (emission[channel] == "550") {
+        mmc.setSerialPortCommand(com_wheel, "0", "\r\n");
+        //mmc.setProperty("Wheel-A", "Label", "Filter-0");
+      }
+      else if (emission[channel] == "500") {
+        mmc.setSerialPortCommand(com_wheel, "6", "\r\n");
+        //mmc.setProperty("Wheel-A", "Label", "Filter-6");
+      }
+      else if (emission[channel] == "450") {
+        mmc.setSerialPortCommand(com_wheel, "1", "\r\n");
+        //mmc.setProperty("Wheel-A", "Label", "Filter-6");
+      }
+      else if (emission[channel] == "Bright field") {
+        mmc.setSerialPortCommand(com_wheel, "4", "\r\n");
+        //mmc.setProperty("Wheel-A", "Label", "Filter-1");
+      }
+      else if (emission[channel] == "535") {
+        mmc.setSerialPortCommand(com_wheel, "3", "\r\n");
+        //mmc.setProperty("Wheel-A", "Label", "Filter-1");
+      }
+      for (Z = 0; Z < nrSlices [view]; Z++) { //////////////////////////////////////////////////////////////////////////////////////////Z LOOP
+        if (autoFocus == "YES") {
+          if (Z != 0 && Z % (slicePerFocus * 12) == 0) {
+            ij.IJ.showMessage("Turn on live, manually adjust focus, and turn live-mode off. You have 40s");
+            gui.sleep (30000);
+            ij.IJ.showMessage("10 sec left");
+            gui.sleep (10000);
+          }
+          else if (Z != 0 && Z % slicePerFocus == 0) {
+            mmc.setSerialPortCommand(com_focus, "0" + (int)focusStp, "\r");
+            print ("REFOCUSING: " + focusStp);
+            //                gui.sleep (500);
+          }
+        }
+        mmc.setSerialPortCommand(com_asi, "1H R Z=" + distance * 10, "\r\n");
+        //mmc.setPosition(mmc.getFocusDevice(), Z * distance + zPos);
+        if (edit == 1) print("MOVING Z -> " + (Z * distance + zLow [view]) + " um");
+        //gui.sleep(zSettleTime); //movement takes 10 ms
+
+        ////////////////
+        //EXCITATION
+        //LASER: 1   0   2   3   4      5
+        //COLOR: 650 530 488 408/444 GALVO  NUL
+        //STATE: 2   1   32  16  8      4
+
+
+        //////////////
+        //BRIGHT field
+        if (first_image [view] == 0) {
+          mmc.setSerialPortCommand(com_hdd_shutter, "77741", "\r\n");
+          Z--; 
+          //gui.sleep(300); 
+        }
+        else if (excitation[channel] == "650") {
+          mmc.setSerialPortCommand(com_controller, "77711", "\r") ;   //
+          //              mmc.setProperty ("Arduino-Switch", "Label", 2);
+        }
+        else if (excitation[channel] == "532") {
+          //      mmc.setProperty ("Arduino-Switch", "Label", 1);
+          mmc.setSerialPortCommand(com_controller, "77701", "\r") ;   //
+          mmc.setSerialPortCommand(com_hdd_shutter, "77701", "\r\n");
+          // print ("shutter open");
+          // gui.sleep(5000);
+        }
+        else if (excitation[channel] == "488") {
+          mmc.setSerialPortCommand(com_controller, "77721", "\r") ;   //
+          mmc.setSerialPortCommand(com_hdd_shutter, "77711", "\r\n");
+          //              mmc.setProperty ("Arduino-Switch", "Label", 32);
+        }
+        else if (excitation[channel] == "408/444") {
+          mmc.setSerialPortCommand(com_controller, "77731", "\r") ;   //
+          mmc.setSerialPortCommand(com_hdd_shutter, "77731", "\r\n");
+          //              mmc.setProperty ("Arduino-Switch", "Label", 16);
+          //              gui.sleep(100);
+        }
+        //mmc.setProperty ("Arduino-Shutter", "OnOff", "1"); //laser on
+        //          if (excitation[channel] == "408/444"){
+        //            for (k=0; k<1000; k++)
+        //              mmc.setSerialPortCommand(com_cube, "L=1", "\r"); // laser on
+        //          }
+
+        for (fram = 0; fram < nrFram; fram ++) { //frame loop
+          if (z != 0) gui.sleep(zSettleTime); //consider Z movement
+
+          //----------------------------------------------------------------------------------------------------------ACQUISITION BEGIN
+          t1 = System.currentTimeMillis();
+          mmc.setExposure (exposure);
+
+          //gui.sleep (15);
+          mmc.snapImage();
+          //mmc.setProperty ("Arduino-Shutter", "OnOff", "0"); //laser off
+
+          ///////////////
+          //WAIT FOR CAM
+          while (mmc.deviceBusy(mmc.getCameraDevice()) == true) {
+            gui.sleep (1);
+            print ("CAM BUSY");
+          }
+
+          img = mmc.getImage();
+          ImageProcessor proc0 = ImageUtils.makeProcessor(mmc, img);
+
+          roi1 = mmc.getROI();
+          width =  roi1.width;
+          height = roi1.height;
+          proc0 = proc0.resize((int)width, (int)height);
+
+          ImagePlus img = new ImagePlus("", proc0);
+
+          //////////////////////////////////////////////////////////////////////////////////////////////////save image
+          FileSaver fs =  new FileSaver(img);
+          if (first_image [view] == 0) {//saving bright field
+            imgName = rootDirName  + "//v" + view + "c" + channel + "//bright_f.tif";
+            first_image [view] = 1; 
+          }
+          else imgName = rootDirName + "//v" + view + "c" + channel +  "//" + acqName + "_t" + TIME + "v" + view + "z" + Z +  "f" + fram + "c" + channel + ".tif";
+          //                                else imgName = rootDirName + "//x" + X + "y" + Y + "c" + channel + "v" + view + "//" + acqName + "_t" + TIME + "y" + Y + "x" + X + "v" + view + "z" + Z +  "f" + fram + "s" + slit + "c" + channel + ".tif";
+          fs.saveAsTiff(imgName);
+          print ("ACQUIRED " + imgName);
+
+          //////////
+          //SHOW IMG
+          image_show = IJ.openImage(imgName);
+          image_show.show();
+
+          ////////////////
+          //CLOSE SHUTTER
+          mmc.setSerialPortCommand(com_controller, "77790", "\r"); //shut all lasers (software shutter)
+          mmc.setSerialPortCommand(com_hdd_shutter, "77700", "\r\n");
+          mmc.setSerialPortCommand(com_hdd_shutter, "77710", "\r\n");
+          mmc.setSerialPortCommand(com_hdd_shutter, "77730", "\r\n");
+          mmc.setSerialPortCommand(com_hdd_shutter, "77740", "\r\n");
+          /////////////////
+          //CHANGE IMG PROP
+          IJ.run("Properties...", "channels=1 slices=1 frames=1 unit=µm pixel_width=" + pixelWidth + " pixel_height=" + pixelHeight + " voxel_depth=" + pixelDepth + " frame=[0 sec] origin=0,0 global");
+
+          imageCount++;
+          if (imageCount == 15)   {
+            ij.IJ.run("Close All");
+            imageCount = 0;
+          }
+
+          //----------------------------------------------------------------------------------------------------------ACQUISITION FIN
+        } //frame loop ends              
+      } //////////////////////////////////////////////////////////////////////////////////////////////////channel loop ends
+    }//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////Z LOOP ENDS
+  } //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////multi-view loop ends
+
+  if (nrTime == 1) inter_volume_interval = 0;
+  getTime ();
+  itTook = System.currentTimeMillis() - now;
+
+  if (((int)inter_volume_interval * 1000 - itTook) > 0) {
+    for (int i = inter_volume_interval - itTook / 1000; i > 0; i--) {
+      gui.sleep(1000);
+      print ("@TIME INTERVAL: " + i + "s left");
+    }
+  }
+  else if ((int)inter_volume_interval * 1000 < itTook) {
+    gui.message ("**********************************************************************");
+    gui.message ("INTERVAL time " + (itTook - (int)inter_volume_interval * 1000) + "ms too short"); //****************************************************************************
+    gui.message ("**********************************************************************");
+    //break;
+  }
+}  ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////// TIME LOOP ENDS
+
+mmc.stopSequenceAcquisition();
+//POSITION HOME
+mmc.setSerialPortCommand(com_asi, "1H M Z=" + zLow [0], "\r\n");
+mmc.setSerialPortCommand(com_controller, "77790", "\r"); //shut all lasers
+print(" >>> ACQUISITION COMPLETED @ "  + hr + ": " + min + ": " + sec + "  " + mth + " / " + day + " / " + yr);
+IJ.run("Close All");
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
